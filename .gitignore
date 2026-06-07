@@ -1,0 +1,44 @@
+# Build outputs
+bin/
+obj/
+out/
+publish/
+artifacts/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider / ReSharper
+.idea/
+_ReSharper*/
+*.DotSettings.user
+
+# VS Code
+.vscode/
+
+# Test and coverage outputs
+TestResults/
+*.trx
+coverage/
+coverage.cobertura.xml
+*.coverage
+*.coveragexml
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.cache
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+
+# Windows
+Thumbs.db
+Desktop.ini
