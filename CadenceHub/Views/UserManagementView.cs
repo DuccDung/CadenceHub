@@ -12,12 +12,14 @@ public sealed class UserManagementView : UserControl
     private readonly TextBox _usernameBox = new();
     private readonly TextBox _displayNameBox = new();
     private readonly TextBox _passwordBox = new();
-    private readonly ComboBox _staffBox = new();
+    private readonly TextBox _staffTextBox = new();
     private readonly CheckedListBox _rolesBox = new();
     private readonly CheckBox _activeCheck = new() { Text = "Đang hoạt động", Checked = true, Dock = DockStyle.Fill };
     private int _selectedId;
+    private int? _selectedStaffId;
+    private bool _isOpeningStaffSearch;
     private List<RoleOption> _roles = new();
-    private List<StaffOption> _staff = new();
+    private List<StaffEditorRow> _staff = new();
 
     public UserManagementView(AuthenticatedUser actor)
     {
@@ -52,9 +54,7 @@ public sealed class UserManagementView : UserControl
         AddTextField(form, "Mật khẩu mới", _passwordBox, 0, 1);
         _passwordBox.UseSystemPasswordChar = true;
         form.Controls.Add(new Label { Text = "Cán bộ liên kết", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = AppTheme.Font(10, FontStyle.Bold) }, 2, 1);
-        _staffBox.Dock = DockStyle.Fill;
-        _staffBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        form.Controls.Add(_staffBox, 3, 1);
+        form.Controls.Add(BuildStaffPicker(), 3, 1);
 
         form.Controls.Add(new Label { Text = "Vai trò", Dock = DockStyle.Fill, TextAlign = ContentAlignment.TopLeft, Font = AppTheme.Font(10, FontStyle.Bold) }, 0, 2);
         _rolesBox.Dock = DockStyle.Fill;
@@ -92,18 +92,34 @@ public sealed class UserManagementView : UserControl
         form.Controls.Add(box, column + 1, row);
     }
 
+    private Control BuildStaffPicker()
+    {
+        _staffTextBox.Dock = DockStyle.Fill;
+        _staffTextBox.ReadOnly = true;
+        _staffTextBox.BackColor = Color.White;
+        _staffTextBox.PlaceholderText = "Không liên kết cán bộ";
+        _staffTextBox.Cursor = Cursors.Hand;
+        _staffTextBox.Click += async (_, _) => await OpenStaffSearchAsync();
+        _staffTextBox.KeyDown += async (_, e) =>
+        {
+            if (e.KeyCode is Keys.Enter or Keys.F4)
+            {
+                await OpenStaffSearchAsync();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+        };
+
+        return _staffTextBox;
+    }
+
     private async Task LoadDataAsync()
     {
         try
         {
             _roles = await _dataService.GetRoleOptionsAsync();
-            _staff = [new StaffOption(0, "(Không liên kết)")];
-            _staff.AddRange(await _dataService.GetStaffOptionsAsync(false));
-
-            _staffBox.DataSource = null;
-            _staffBox.DataSource = _staff;
-            _staffBox.DisplayMember = nameof(StaffOption.Name);
-            _staffBox.ValueMember = nameof(StaffOption.Id);
+            _staff = await _dataService.GetStaffRowsAsync();
+            RefreshSelectedStaffText();
 
             _rolesBox.Items.Clear();
             foreach (var role in _roles)
@@ -132,7 +148,7 @@ public sealed class UserManagementView : UserControl
         _displayNameBox.Text = row.DisplayName;
         _passwordBox.Clear();
         _activeCheck.Checked = row.IsActive;
-        _staffBox.SelectedValue = row.StaffId ?? 0;
+        SetSelectedStaff(row.StaffId, row.StaffName);
 
         var assignedCodes = row.Roles.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < _rolesBox.Items.Count; i++)
@@ -149,11 +165,79 @@ public sealed class UserManagementView : UserControl
         _displayNameBox.Clear();
         _passwordBox.Clear();
         _activeCheck.Checked = true;
-        _staffBox.SelectedValue = 0;
+        SetNoLinkedStaff();
         for (var i = 0; i < _rolesBox.Items.Count; i++)
         {
             _rolesBox.SetItemChecked(i, false);
         }
+    }
+
+    private async Task OpenStaffSearchAsync()
+    {
+        if (_isOpeningStaffSearch)
+        {
+            return;
+        }
+
+        _isOpeningStaffSearch = true;
+
+        try
+        {
+            _staff = await _dataService.GetStaffRowsAsync();
+            using var dialog = new StaffLinkSearchDialog(_staff, _selectedStaffId);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
+            if (dialog.SelectedStaff is null)
+            {
+                SetNoLinkedStaff();
+                return;
+            }
+
+            SetSelectedStaff(dialog.SelectedStaff);
+        }
+        catch (Exception ex)
+        {
+            ViewHelpers.ShowError(this, ex);
+        }
+        finally
+        {
+            _isOpeningStaffSearch = false;
+        }
+    }
+
+    private void SetSelectedStaff(StaffEditorRow staff)
+    {
+        _selectedStaffId = staff.Id;
+        _staffTextBox.Text = $"{staff.Id} - {staff.StaffCode} - {staff.FullName}";
+    }
+
+    private void SetSelectedStaff(int? staffId, string fallbackName)
+    {
+        _selectedStaffId = staffId;
+        RefreshSelectedStaffText(fallbackName);
+    }
+
+    private void SetNoLinkedStaff()
+    {
+        _selectedStaffId = null;
+        _staffTextBox.Text = "Không liên kết cán bộ";
+    }
+
+    private void RefreshSelectedStaffText(string fallbackName = "")
+    {
+        if (_selectedStaffId is not int staffId || staffId <= 0)
+        {
+            SetNoLinkedStaff();
+            return;
+        }
+
+        var staff = _staff.FirstOrDefault(item => item.Id == staffId);
+        _staffTextBox.Text = staff is null
+            ? fallbackName
+            : $"{staff.Id} - {staff.StaffCode} - {staff.FullName}";
     }
 
     private async Task SaveAsync()
@@ -173,7 +257,7 @@ public sealed class UserManagementView : UserControl
                 Username = _usernameBox.Text,
                 DisplayName = _displayNameBox.Text,
                 NewPassword = _passwordBox.Text,
-                StaffId = _staffBox.SelectedValue is int staffId && staffId > 0 ? staffId : null,
+                StaffId = _selectedStaffId,
                 IsActive = _activeCheck.Checked,
                 RoleIds = selectedRoles
             }, _actor);
