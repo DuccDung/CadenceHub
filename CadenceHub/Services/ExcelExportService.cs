@@ -8,17 +8,73 @@ namespace CadenceHub.Services;
 public sealed class ExcelExportService
 {
     private readonly BusinessDataService _dataService = new();
+    private static readonly IReadOnlyDictionary<string, string> VietnameseHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Id"] = "ID",
+        ["Ngay"] = "Ngày",
+        ["Date"] = "Ngày",
+        ["Month"] = "Tháng",
+        ["StaffCode"] = "Mã cán bộ",
+        ["FullName"] = "Họ tên",
+        ["Unit"] = "Đơn vị",
+        ["PositionCode"] = "Mã chức vụ",
+        ["PositionName"] = "Chức vụ",
+        ["StatusName"] = "Trạng thái",
+        ["Count"] = "Số lượng",
+        ["Rate"] = "Tỷ lệ (%)",
+        ["Note"] = "Ghi chú",
+        ["EnteredBy"] = "Người nhập",
+        ["CreatedAt"] = "Thời gian tạo",
+        ["UpdatedAt"] = "Thời gian cập nhật",
+        ["PresentDays"] = "Số ngày có mặt",
+        ["AbsentDays"] = "Số ngày vắng",
+        ["RecordedDays"] = "Số ngày ghi nhận",
+        ["AttendanceRate"] = "Tỷ lệ chuyên cần (%)",
+        ["Username"] = "Tên đăng nhập",
+        ["DisplayName"] = "Tên hiển thị",
+        ["StaffId"] = "ID cán bộ",
+        ["IsActive"] = "Hoạt động",
+        ["LastLoginAt"] = "Lần đăng nhập gần nhất",
+        ["UserId"] = "ID tài khoản",
+        ["RoleId"] = "ID vai trò",
+        ["Code"] = "Mã",
+        ["Name"] = "Tên",
+        ["Description"] = "Mô tả",
+        ["SortOrder"] = "Thứ tự",
+        ["IsPresentGroup"] = "Nhóm có mặt",
+        ["IsAbsentGroup"] = "Nhóm vắng",
+        ["DutyDate"] = "Ngày trực",
+        ["ShiftCode"] = "Ca trực",
+        ["AssignedByUserId"] = "ID người phân công",
+        ["AttendanceDate"] = "Ngày điểm danh",
+        ["StatusId"] = "ID trạng thái",
+        ["EnteredByUserId"] = "ID người nhập",
+        ["UpdatedByUserId"] = "ID người cập nhật",
+        ["DutyScheduleId"] = "ID lịch trực",
+        ["Key"] = "Mã cấu hình",
+        ["Value"] = "Giá trị",
+        ["ActorUserId"] = "ID người thao tác",
+        ["ActionCode"] = "Hành động",
+        ["EntityName"] = "Bảng dữ liệu",
+        ["EntityId"] = "ID dữ liệu",
+        ["OldValue"] = "Giá trị cũ",
+        ["NewValue"] = "Giá trị mới"
+    };
 
-    public async Task<string> ExportDailyReportAsync(DateOnly date)
+    public async Task<string> ExportDailyReportAsync(DateOnly date, string? outputPath = null)
     {
         var summary = await _dataService.GetDailySummaryAsync(date);
         var details = await _dataService.GetDailyDetailsAsync(date);
-        var directory = await _dataService.GetExportDirectoryAsync();
-        var path = Path.Combine(directory, $"bao_cao_ngay_{date:yyyyMMdd}.xlsx");
+        var path = outputPath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            var directory = await _dataService.GetExportDirectoryAsync();
+            path = Path.Combine(directory, $"bao_cao_ngay_{date:yyyyMMdd}.xlsx");
+        }
 
         using var workbook = new XLWorkbook();
-        AddWorksheet(workbook, "Tong hop", summary);
-        AddWorksheet(workbook, "Chi tiet", details.Select(row => new
+        AddWorksheet(workbook, "Tổng hợp", summary);
+        AddWorksheet(workbook, "Chi tiết", details.Select(row => new
         {
             Ngay = row.Date.ToString("dd/MM/yyyy"),
             row.StaffCode,
@@ -32,18 +88,24 @@ public sealed class ExcelExportService
             row.UpdatedAt
         }).ToList());
 
+        EnsureOutputDirectory(path);
         workbook.SaveAs(path);
         return path;
     }
 
-    public async Task<string> ExportMonthlyReportAsync(int year, int month)
+    public async Task<string> ExportMonthlyReportAsync(int year, int month, string? outputPath = null)
     {
         var rows = await _dataService.GetMonthlySummaryAsync(year, month);
-        var directory = await _dataService.GetExportDirectoryAsync();
-        var path = Path.Combine(directory, $"bao_cao_thang_{year:0000}_{month:00}.xlsx");
+        var path = outputPath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            var directory = await _dataService.GetExportDirectoryAsync();
+            path = Path.Combine(directory, $"bao_cao_thang_{year:0000}_{month:00}.xlsx");
+        }
 
         using var workbook = new XLWorkbook();
-        AddWorksheet(workbook, "Bao cao thang", rows);
+        AddWorksheet(workbook, "Báo cáo tháng", rows);
+        EnsureOutputDirectory(path);
         workbook.SaveAs(path);
         return path;
     }
@@ -169,18 +231,28 @@ public sealed class ExcelExportService
         {
             worksheet.Cell(1, 1).Value = "Không có dữ liệu";
             worksheet.Cell(1, 1).Style.Font.Bold = true;
-            worksheet.Columns().AdjustToContents();
+            worksheet.Columns().AdjustToContents(12, 70);
             return;
         }
 
         worksheet.Cell(1, 1).InsertTable(rows);
-        worksheet.Columns().AdjustToContents(8, 48);
+        ApplyVietnameseHeaders(worksheet);
+        worksheet.Columns().AdjustToContents(12, 70);
+        foreach (var column in worksheet.ColumnsUsed())
+        {
+            if (column.Width < 16)
+            {
+                column.Width = 16;
+            }
+        }
+
         worksheet.SheetView.FreezeRows(1);
 
         var used = worksheet.RangeUsed();
         if (used is not null)
         {
             used.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+            used.Style.Alignment.WrapText = false;
             used.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
             used.Style.Border.InsideBorder = XLBorderStyleValues.Hair;
             worksheet.Row(1).Style.Font.Bold = true;
@@ -194,5 +266,26 @@ public sealed class ExcelExportService
         var invalidChars = new[] { ':', '\\', '/', '?', '*', '[', ']' };
         var sanitized = invalidChars.Aggregate(value, (current, ch) => current.Replace(ch, '_'));
         return sanitized.Length > 31 ? sanitized[..31] : sanitized;
+    }
+
+    private static void ApplyVietnameseHeaders(IXLWorksheet worksheet)
+    {
+        foreach (var cell in worksheet.Row(1).CellsUsed())
+        {
+            var key = cell.GetString();
+            if (VietnameseHeaders.TryGetValue(key, out var vietnameseHeader))
+            {
+                cell.Value = vietnameseHeader;
+            }
+        }
+    }
+
+    private static void EnsureOutputDirectory(string path)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
     }
 }

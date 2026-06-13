@@ -10,6 +10,9 @@ public sealed class DailyReportView : UserControl
     private readonly DateTimePicker _datePicker = new();
     private readonly DataGridView _summaryGrid = new();
     private readonly DataGridView _detailGrid = new();
+    private readonly Button _loadButton = ViewHelpers.CommandButton("Xem báo cáo", AppTheme.DeepGreen);
+    private readonly Button _exportButton = ViewHelpers.CommandButton("Xuất Excel");
+    private bool _isBusy;
 
     public DailyReportView()
     {
@@ -31,17 +34,16 @@ public sealed class DailyReportView : UserControl
         _datePicker.CustomFormat = "dd/MM/yyyy";
         _datePicker.Width = 180;
         toolbar.Controls.Add(_datePicker);
-        var loadButton = ViewHelpers.CommandButton("Xem báo cáo", AppTheme.DeepGreen);
-        loadButton.Click += async (_, _) => await LoadDataAsync();
-        toolbar.Controls.Add(loadButton);
-        var exportButton = ViewHelpers.CommandButton("Xuất Excel");
-        exportButton.Click += async (_, _) => await ExportAsync();
-        toolbar.Controls.Add(exportButton);
+        _loadButton.Click += async (_, _) => await LoadDataAsync();
+        toolbar.Controls.Add(_loadButton);
+        _exportButton.Click += async (_, _) => await ExportAsync();
+        toolbar.Controls.Add(_exportButton);
         root.Controls.Add(toolbar, 0, 0);
 
         root.Controls.Add(BuildGridCard("Tổng hợp theo trạng thái", _summaryGrid), 0, 1);
         root.Controls.Add(BuildGridCard("Chi tiết điểm danh trong ngày", _detailGrid), 0, 2);
         Controls.Add(root);
+        UpdateButtonStates();
     }
 
     private static Control BuildGridCard(string title, DataGridView grid)
@@ -63,6 +65,14 @@ public sealed class DailyReportView : UserControl
     {
         try
         {
+            if (_isBusy)
+            {
+                return;
+            }
+
+            _isBusy = true;
+            UpdateButtonStates();
+
             var date = ViewHelpers.DateOnlyFrom(_datePicker);
             _summaryGrid.DataSource = await _dataService.GetDailySummaryAsync(date);
             _detailGrid.DataSource = await _dataService.GetDailyDetailsAsync(date);
@@ -71,18 +81,49 @@ public sealed class DailyReportView : UserControl
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
     }
 
     private async Task ExportAsync()
     {
         try
         {
-            var path = await _exportService.ExportDailyReportAsync(ViewHelpers.DateOnlyFrom(_datePicker));
+            if (_isBusy)
+            {
+                return;
+            }
+
+            var date = ViewHelpers.DateOnlyFrom(_datePicker);
+            var outputPath = ViewHelpers.PickExcelSavePath(this, $"bao_cao_ngay_{date:yyyyMMdd}.xlsx");
+            if (outputPath is null)
+            {
+                return;
+            }
+
+            _isBusy = true;
+            UpdateButtonStates();
+
+            var path = await _exportService.ExportDailyReportAsync(date, outputPath);
             ViewHelpers.ShowInfo(this, $"Đã xuất báo cáo:\r\n{path}");
         }
         catch (Exception ex)
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
+    }
+
+    private void UpdateButtonStates()
+    {
+        ViewHelpers.SetButtonState(_loadButton, !_isBusy, AppTheme.DeepGreen);
+        ViewHelpers.SetButtonState(_exportButton, !_isBusy, AppTheme.PoliceRed);
     }
 }

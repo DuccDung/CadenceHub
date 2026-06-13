@@ -12,6 +12,7 @@ internal sealed class StaffSearchDialog : Form
     private readonly int _initialStaffId;
     private readonly TextBox _searchBox = new();
     private readonly DataGridView _grid = new();
+    private readonly Button _selectButton = ViewHelpers.CommandButton("Chọn", AppTheme.DeepGreen);
 
     [Browsable(false)]
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -50,7 +51,10 @@ internal sealed class StaffSearchDialog : Form
         root.Controls.Add(_searchBox, 0, 0);
 
         ViewHelpers.StyleGrid(_grid);
+        _grid.AutoGenerateColumns = false;
         _grid.ReadOnly = true;
+        AddGridColumns();
+        _grid.SelectionChanged += (_, _) => UpdateButtonStates();
         _grid.CellDoubleClick += (_, _) => ConfirmSelection();
         _grid.KeyDown += (_, e) =>
         {
@@ -66,72 +70,67 @@ internal sealed class StaffSearchDialog : Form
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, BackColor = AppTheme.Page, Padding = new Padding(0, 12, 0, 0) };
         var cancelButton = ViewHelpers.CommandButton("Đóng", AppTheme.MutedText);
         cancelButton.DialogResult = DialogResult.Cancel;
-        var selectButton = ViewHelpers.CommandButton("Chọn", AppTheme.DeepGreen);
-        selectButton.Click += (_, _) => ConfirmSelection();
+        _selectButton.Click += (_, _) => ConfirmSelection();
         buttons.Controls.Add(cancelButton);
-        buttons.Controls.Add(selectButton);
+        buttons.Controls.Add(_selectButton);
         root.Controls.Add(buttons, 0, 2);
 
-        AcceptButton = selectButton;
+        AcceptButton = _selectButton;
         CancelButton = cancelButton;
         Controls.Add(root);
+        UpdateButtonStates();
     }
 
     private void ApplyFilter()
     {
         var query = NormalizeSearchText(_searchBox.Text);
+        var tokens = query.Split(' ', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         var filtered = string.IsNullOrWhiteSpace(query)
             ? _allStaff.ToList()
             : _allStaff
-                .Where(staff => NormalizeSearchText($"{staff.StaffCode} {staff.FullName} {staff.Unit} {staff.Usernames}").Contains(query, StringComparison.Ordinal))
+                .Where(staff =>
+                {
+                    var searchable = NormalizeSearchText($"{staff.StaffCode} {staff.FullName} {staff.Unit} {staff.Usernames}");
+                    return tokens.All(token => searchable.Contains(token, StringComparison.Ordinal));
+                })
                 .ToList();
 
         _grid.DataSource = null;
         _grid.DataSource = filtered;
-        ConfigureGridColumns();
-        SelectRowById(_initialStaffId);
-    }
-
-    private void ConfigureGridColumns()
-    {
-        HideColumn(nameof(LinkedStaffOption.Id));
-        HideColumn(nameof(LinkedStaffOption.DisplayName));
-        ConfigureColumn(nameof(LinkedStaffOption.StaffCode), "Mã cán bộ", 110);
-        ConfigureColumn(nameof(LinkedStaffOption.FullName), "Họ tên", 230);
-        ConfigureColumn(nameof(LinkedStaffOption.Unit), "Đơn vị", 120);
-        ConfigureColumn(nameof(LinkedStaffOption.Usernames), "Tài khoản", 170);
-
-        if (_grid.Columns[nameof(LinkedStaffOption.FullName)] is { } nameColumn)
-        {
-            nameColumn.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-        }
-    }
-
-    private void ConfigureColumn(string name, string header, int width)
-    {
-        if (_grid.Columns[name] is not { } column)
+        if (_initialStaffId > 0 && SelectRowById(_initialStaffId))
         {
             return;
         }
 
-        column.HeaderText = header;
-        column.MinimumWidth = width;
-        column.Width = width;
+        ClearGridSelection();
     }
 
-    private void HideColumn(string name)
+    private void AddGridColumns()
     {
-        if (_grid.Columns[name] is { } column)
-        {
-            column.Visible = false;
-        }
+        _grid.Columns.Add(BuildTextColumn(nameof(LinkedStaffOption.StaffCode), "Mã cán bộ", 110, 90));
+        _grid.Columns.Add(BuildTextColumn(nameof(LinkedStaffOption.FullName), "Họ tên", 230, 170));
+        _grid.Columns.Add(BuildTextColumn(nameof(LinkedStaffOption.Unit), "Đơn vị", 120, 90));
+        _grid.Columns.Add(BuildTextColumn(nameof(LinkedStaffOption.Usernames), "Tài khoản", 170, 120));
     }
 
-    private void SelectRowById(int staffId)
+    private static DataGridViewTextBoxColumn BuildTextColumn(string propertyName, string header, float fillWeight, int minimumWidth)
+    {
+        return new DataGridViewTextBoxColumn
+        {
+            Name = propertyName,
+            DataPropertyName = propertyName,
+            HeaderText = header,
+            FillWeight = fillWeight,
+            MinimumWidth = minimumWidth,
+            ReadOnly = true
+        };
+    }
+
+    private bool SelectRowById(int staffId)
     {
         if (staffId <= 0)
         {
-            return;
+            return false;
         }
 
         foreach (DataGridViewRow row in _grid.Rows)
@@ -143,12 +142,25 @@ internal sealed class StaffSearchDialog : Form
 
             row.Selected = true;
             _grid.CurrentCell = row.Cells[nameof(LinkedStaffOption.FullName)];
-            return;
+            return true;
         }
+
+        return false;
+    }
+
+    private void ClearGridSelection()
+    {
+        ViewHelpers.ClearGridSelection(_grid);
+        UpdateButtonStates();
     }
 
     private void ConfirmSelection()
     {
+        if (!_selectButton.Enabled)
+        {
+            return;
+        }
+
         if (_grid.CurrentRow?.DataBoundItem is not LinkedStaffOption staff)
         {
             return;
@@ -157,6 +169,11 @@ internal sealed class StaffSearchDialog : Form
         SelectedStaff = staff;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    private void UpdateButtonStates()
+    {
+        ViewHelpers.SetButtonState(_selectButton, _grid.CurrentRow?.DataBoundItem is LinkedStaffOption, AppTheme.DeepGreen);
     }
 
     private static string NormalizeSearchText(string value)

@@ -12,9 +12,12 @@ public sealed class AttendanceTodayView : UserControl
     private readonly DateTimePicker _datePicker = new();
     private readonly Label _policyLabel = new();
     private readonly Button _saveButton = ViewHelpers.CommandButton("Lưu điểm danh hôm nay");
+    private readonly Button _reloadButton = ViewHelpers.CommandButton("Tải lại", AppTheme.DeepGreen);
     private List<AttendanceEntryRow> _rows = new();
     private List<AttendanceStatusOption> _statuses = new();
     private int _statusColumnIndex = -1;
+    private bool _isBusy;
+    private bool _canEdit;
 
     public AttendanceTodayView(AuthenticatedUser user)
     {
@@ -49,9 +52,8 @@ public sealed class AttendanceTodayView : UserControl
         _datePicker.ValueChanged += async (_, _) => await LoadDataAsync();
         toolbar.Controls.Add(_datePicker, 0, 0);
 
-        var reloadButton = ViewHelpers.CommandButton("Tải lại", AppTheme.DeepGreen);
-        reloadButton.Click += async (_, _) => await LoadDataAsync();
-        toolbar.Controls.Add(reloadButton, 1, 0);
+        _reloadButton.Click += async (_, _) => await LoadDataAsync();
+        toolbar.Controls.Add(_reloadButton, 1, 0);
 
         _saveButton.Click += async (_, _) => await SaveAsync();
         toolbar.Controls.Add(_saveButton, 2, 0);
@@ -85,6 +87,7 @@ public sealed class AttendanceTodayView : UserControl
         root.Controls.Add(card, 0, 1);
 
         Controls.Add(root);
+        UpdateButtonStates();
     }
 
     private void OpenStatusDropDown(object? sender, DataGridViewCellEventArgs e)
@@ -107,6 +110,14 @@ public sealed class AttendanceTodayView : UserControl
     {
         try
         {
+            if (_isBusy)
+            {
+                return;
+            }
+
+            _isBusy = true;
+            UpdateButtonStates();
+
             var date = ViewHelpers.DateOnlyFrom(_datePicker);
             _statuses = await _dataService.GetAttendanceStatusesAsync();
             _rows = await _dataService.GetAttendanceEntriesAsync(date);
@@ -128,7 +139,7 @@ public sealed class AttendanceTodayView : UserControl
                 }
             }
 
-            _saveButton.Enabled = policy.CanEdit;
+            _canEdit = policy.CanEdit;
             _policyLabel.Text = policy.Message;
             _policyLabel.ForeColor = policy.CanEdit ? AppTheme.Success : AppTheme.Warning;
         }
@@ -136,21 +147,45 @@ public sealed class AttendanceTodayView : UserControl
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
     }
 
     private async Task SaveAsync()
     {
         try
         {
+            if (!_saveButton.Enabled)
+            {
+                return;
+            }
+
+            _isBusy = true;
+            UpdateButtonStates();
             _grid.EndEdit();
 
             await _dataService.SaveAttendanceAsync(ViewHelpers.DateOnlyFrom(_datePicker), _rows, _user);
             ViewHelpers.ShowInfo(this, "Đã lưu điểm danh hôm nay.");
+            _isBusy = false;
             await LoadDataAsync();
         }
         catch (Exception ex)
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
+    }
+
+    private void UpdateButtonStates()
+    {
+        ViewHelpers.SetButtonState(_reloadButton, !_isBusy, AppTheme.DeepGreen);
+        ViewHelpers.SetButtonState(_saveButton, !_isBusy && _canEdit, AppTheme.PoliceRed);
     }
 }

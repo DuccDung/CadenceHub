@@ -304,6 +304,9 @@ public sealed class UserManagementView : UserControl
                 return;
             }
 
+            _isLoadingData = true;
+            UpdateButtonStates();
+
             var selectedRoles = _rolesBox.CheckedItems.Cast<RoleOption>().Select(role => role.Id).ToArray();
             if (string.IsNullOrWhiteSpace(_usernameBox.Text) || string.IsNullOrWhiteSpace(_displayNameBox.Text) || selectedRoles.Length == 0)
             {
@@ -324,21 +327,23 @@ public sealed class UserManagementView : UserControl
 
             ViewHelpers.ShowInfo(this, "Đã lưu tài khoản.");
             ClearForm();
+            _isLoadingData = false;
             await LoadDataAsync();
         }
         catch (Exception ex)
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isLoadingData = false;
+            UpdateButtonStates();
+        }
     }
 
     private void ClearGridSelection()
     {
-        _grid.ClearSelection();
-        if (_grid.Rows.Count > 0)
-        {
-            _grid.CurrentCell = null;
-        }
+        ViewHelpers.ClearGridSelection(_grid);
     }
 
     private bool HasAnyFormInput()
@@ -373,16 +378,8 @@ public sealed class UserManagementView : UserControl
 
     private void UpdateButtonStates()
     {
-        SetButtonState(_newButton, !_isLoadingData && HasAnyFormInput(), AppTheme.DeepGreen);
-        SetButtonState(_saveButton, !_isLoadingData && CanSave(), AppTheme.PoliceRed);
-        SetButtonState(_reloadButton, !_isLoadingData, AppTheme.DeepGreen);
-    }
-
-    private static void SetButtonState(Button button, bool enabled, Color activeBackColor)
-    {
-        button.Enabled = enabled;
-        button.BackColor = enabled ? activeBackColor : Color.FromArgb(202, 207, 214);
-        button.ForeColor = enabled ? Color.White : Color.FromArgb(111, 119, 130);
-        button.Cursor = enabled ? Cursors.Hand : Cursors.Default;
+        ViewHelpers.SetButtonState(_newButton, !_isLoadingData && HasAnyFormInput(), AppTheme.DeepGreen);
+        ViewHelpers.SetButtonState(_saveButton, !_isLoadingData && CanSave(), AppTheme.PoliceRed);
+        ViewHelpers.SetButtonState(_reloadButton, !_isLoadingData, AppTheme.DeepGreen);
     }
 }

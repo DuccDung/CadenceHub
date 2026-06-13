@@ -9,6 +9,9 @@ public sealed class MonthlyReportView : UserControl
     private readonly ExcelExportService _exportService = new();
     private readonly DateTimePicker _monthPicker = new();
     private readonly DataGridView _grid = new();
+    private readonly Button _loadButton = ViewHelpers.CommandButton("Tạo báo cáo", AppTheme.DeepGreen);
+    private readonly Button _exportButton = ViewHelpers.CommandButton("Xuất Excel");
+    private bool _isBusy;
 
     public MonthlyReportView()
     {
@@ -29,12 +32,10 @@ public sealed class MonthlyReportView : UserControl
         _monthPicker.CustomFormat = "yyyy-MM";
         _monthPicker.Width = 180;
         toolbar.Controls.Add(_monthPicker);
-        var loadButton = ViewHelpers.CommandButton("Tạo báo cáo", AppTheme.DeepGreen);
-        loadButton.Click += async (_, _) => await LoadDataAsync();
-        toolbar.Controls.Add(loadButton);
-        var exportButton = ViewHelpers.CommandButton("Xuất Excel");
-        exportButton.Click += async (_, _) => await ExportAsync();
-        toolbar.Controls.Add(exportButton);
+        _loadButton.Click += async (_, _) => await LoadDataAsync();
+        toolbar.Controls.Add(_loadButton);
+        _exportButton.Click += async (_, _) => await ExportAsync();
+        toolbar.Controls.Add(_exportButton);
         root.Controls.Add(toolbar, 0, 0);
 
         var card = ViewHelpers.Card();
@@ -43,17 +44,31 @@ public sealed class MonthlyReportView : UserControl
         card.Controls.Add(_grid);
         root.Controls.Add(card, 0, 1);
         Controls.Add(root);
+        UpdateButtonStates();
     }
 
     private async Task LoadDataAsync()
     {
         try
         {
+            if (_isBusy)
+            {
+                return;
+            }
+
+            _isBusy = true;
+            UpdateButtonStates();
+
             _grid.DataSource = await _dataService.GetMonthlySummaryAsync(_monthPicker.Value.Year, _monthPicker.Value.Month);
         }
         catch (Exception ex)
         {
             ViewHelpers.ShowError(this, ex);
+        }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
         }
     }
 
@@ -61,12 +76,39 @@ public sealed class MonthlyReportView : UserControl
     {
         try
         {
-            var path = await _exportService.ExportMonthlyReportAsync(_monthPicker.Value.Year, _monthPicker.Value.Month);
+            if (_isBusy)
+            {
+                return;
+            }
+
+            var year = _monthPicker.Value.Year;
+            var month = _monthPicker.Value.Month;
+            var outputPath = ViewHelpers.PickExcelSavePath(this, $"bao_cao_thang_{year:0000}_{month:00}.xlsx");
+            if (outputPath is null)
+            {
+                return;
+            }
+
+            _isBusy = true;
+            UpdateButtonStates();
+
+            var path = await _exportService.ExportMonthlyReportAsync(year, month, outputPath);
             ViewHelpers.ShowInfo(this, $"Đã xuất báo cáo:\r\n{path}");
         }
         catch (Exception ex)
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
+    }
+
+    private void UpdateButtonStates()
+    {
+        ViewHelpers.SetButtonState(_loadButton, !_isBusy, AppTheme.DeepGreen);
+        ViewHelpers.SetButtonState(_exportButton, !_isBusy, AppTheme.PoliceRed);
     }
 }

@@ -9,6 +9,8 @@ public sealed class AuditLogView : UserControl
     private readonly DateTimePicker _fromPicker = new();
     private readonly DateTimePicker _toPicker = new();
     private readonly DataGridView _grid = new();
+    private readonly Button _loadButton = ViewHelpers.CommandButton("Xem nhật ký", AppTheme.DeepGreen);
+    private bool _isBusy;
 
     public AuditLogView()
     {
@@ -28,13 +30,14 @@ public sealed class AuditLogView : UserControl
         _fromPicker.Format = DateTimePickerFormat.Custom;
         _fromPicker.CustomFormat = "dd/MM/yyyy";
         _fromPicker.Value = DateTime.Today.AddDays(-7);
+        _fromPicker.ValueChanged += (_, _) => UpdateButtonStates();
         _toPicker.Format = DateTimePickerFormat.Custom;
         _toPicker.CustomFormat = "dd/MM/yyyy";
+        _toPicker.ValueChanged += (_, _) => UpdateButtonStates();
         toolbar.Controls.Add(_fromPicker);
         toolbar.Controls.Add(_toPicker);
-        var loadButton = ViewHelpers.CommandButton("Xem nhật ký", AppTheme.DeepGreen);
-        loadButton.Click += async (_, _) => await LoadDataAsync();
-        toolbar.Controls.Add(loadButton);
+        _loadButton.Click += async (_, _) => await LoadDataAsync();
+        toolbar.Controls.Add(_loadButton);
         root.Controls.Add(toolbar, 0, 0);
 
         var card = ViewHelpers.Card();
@@ -43,17 +46,41 @@ public sealed class AuditLogView : UserControl
         card.Controls.Add(_grid);
         root.Controls.Add(card, 0, 1);
         Controls.Add(root);
+        UpdateButtonStates();
     }
 
     private async Task LoadDataAsync()
     {
         try
         {
+            if (!_loadButton.Enabled)
+            {
+                return;
+            }
+
+            _isBusy = true;
+            UpdateButtonStates();
+
             _grid.DataSource = await _dataService.GetAuditLogsAsync(ViewHelpers.DateOnlyFrom(_fromPicker), ViewHelpers.DateOnlyFrom(_toPicker));
         }
         catch (Exception ex)
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
+    }
+
+    private bool IsDateRangeValid()
+    {
+        return _fromPicker.Value.Date <= _toPicker.Value.Date;
+    }
+
+    private void UpdateButtonStates()
+    {
+        ViewHelpers.SetButtonState(_loadButton, !_isBusy && IsDateRangeValid(), AppTheme.DeepGreen);
     }
 }

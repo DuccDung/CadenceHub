@@ -14,12 +14,17 @@ public sealed class DutyScheduleView : UserControl
     private readonly DateTimePicker _dutyDatePicker = new();
     private readonly ComboBox _shiftBox = new();
     private readonly TextBox _staffTextBox = new();
-    private readonly Button _staffSearchButton = new();
     private readonly TextBox _noteBox = new();
+    private readonly Button _newButton = ViewHelpers.CommandButton("Tạo mới", AppTheme.DeepGreen);
+    private readonly Button _saveButton = ViewHelpers.CommandButton("Lưu lịch trực");
+    private readonly Button _deleteButton = ViewHelpers.CommandButton("Xóa", AppTheme.Danger);
+    private readonly Button _loadButton = ViewHelpers.CommandButton("Tải danh sách", AppTheme.DeepGreen);
     private int _selectedId;
     private int _selectedStaffId;
     private List<LinkedStaffOption> _staffOptions = new();
     private bool _isOpeningStaffSearch;
+    private bool _isBusy;
+    private bool _isUpdatingForm;
 
     public DutyScheduleView(AuthenticatedUser actor)
     {
@@ -50,11 +55,14 @@ public sealed class DutyScheduleView : UserControl
 
         _fromPicker.Format = DateTimePickerFormat.Custom;
         _fromPicker.CustomFormat = "dd/MM/yyyy";
+        _fromPicker.ValueChanged += (_, _) => UpdateButtonStates();
         _toPicker.Format = DateTimePickerFormat.Custom;
         _toPicker.CustomFormat = "dd/MM/yyyy";
         _toPicker.Value = DateTime.Today.AddDays(30);
+        _toPicker.ValueChanged += (_, _) => UpdateButtonStates();
         _dutyDatePicker.Format = DateTimePickerFormat.Custom;
         _dutyDatePicker.CustomFormat = "dd/MM/yyyy";
+        _dutyDatePicker.ValueChanged += (_, _) => UpdateButtonStates();
 
         AddControlField(form, "Từ ngày", _fromPicker, 0, 0);
         AddControlField(form, "Đến ngày", _toPicker, 2, 0);
@@ -62,20 +70,18 @@ public sealed class DutyScheduleView : UserControl
         _shiftBox.DropDownStyle = ComboBoxStyle.DropDownList;
         _shiftBox.Items.AddRange(["FULL_DAY", "MORNING", "AFTERNOON"]);
         _shiftBox.SelectedIndex = 0;
+        _shiftBox.SelectedIndexChanged += (_, _) => UpdateButtonStates();
         AddControlField(form, "Ca trực", _shiftBox, 2, 1);
         AddControlField(form, "Cán bộ", BuildStaffPicker(), 0, 2);
+        _noteBox.TextChanged += (_, _) => UpdateButtonStates();
         AddControlField(form, "Ghi chú", _noteBox, 2, 2);
 
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = AppTheme.Surface, Padding = new Padding(0, 8, 0, 0) };
-        var newButton = ViewHelpers.CommandButton("Tạo mới", AppTheme.DeepGreen);
-        newButton.Click += (_, _) => ClearForm();
-        var saveButton = ViewHelpers.CommandButton("Lưu lịch trực");
-        saveButton.Click += async (_, _) => await SaveAsync();
-        var deleteButton = ViewHelpers.CommandButton("Xóa", AppTheme.Danger);
-        deleteButton.Click += async (_, _) => await DeleteAsync();
-        var loadButton = ViewHelpers.CommandButton("Tải danh sách", AppTheme.DeepGreen);
-        loadButton.Click += async (_, _) => await LoadDataAsync();
-        buttons.Controls.AddRange([newButton, saveButton, deleteButton, loadButton]);
+        _newButton.Click += (_, _) => ClearForm();
+        _saveButton.Click += async (_, _) => await SaveAsync();
+        _deleteButton.Click += async (_, _) => await DeleteAsync();
+        _loadButton.Click += async (_, _) => await LoadDataAsync();
+        buttons.Controls.AddRange([_newButton, _saveButton, _deleteButton, _loadButton]);
         form.SetColumnSpan(buttons, 4);
         form.Controls.Add(buttons, 0, 3);
         formCard.Controls.Add(form);
@@ -88,17 +94,12 @@ public sealed class DutyScheduleView : UserControl
         gridCard.Controls.Add(_grid);
         root.Controls.Add(gridCard, 0, 1);
         Controls.Add(root);
+
+        UpdateButtonStates();
     }
 
     private Control BuildStaffPicker()
     {
-        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = AppTheme.Surface, Margin = Padding.Empty };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 84));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        panel.Cursor = Cursors.Hand;
-        panel.Click += async (_, _) => await OpenStaffSearchAsync();
-
         _staffTextBox.Dock = DockStyle.Fill;
         _staffTextBox.ReadOnly = true;
         _staffTextBox.BackColor = Color.White;
@@ -115,20 +116,7 @@ public sealed class DutyScheduleView : UserControl
             }
         };
 
-        _staffSearchButton.Text = "Chọn";
-        _staffSearchButton.Dock = DockStyle.Fill;
-        _staffSearchButton.FlatStyle = FlatStyle.Flat;
-        _staffSearchButton.BackColor = AppTheme.Navy;
-        _staffSearchButton.ForeColor = Color.White;
-        _staffSearchButton.Font = AppTheme.Font(10, FontStyle.Bold);
-        _staffSearchButton.Cursor = Cursors.Hand;
-        _staffSearchButton.Margin = new Padding(6, 0, 0, 0);
-        _staffSearchButton.FlatAppearance.BorderSize = 0;
-        _staffSearchButton.Click += async (_, _) => await OpenStaffSearchAsync();
-
-        panel.Controls.Add(_staffTextBox, 0, 0);
-        panel.Controls.Add(_staffSearchButton, 1, 0);
-        return panel;
+        return _staffTextBox;
     }
 
     private static void AddControlField(TableLayoutPanel form, string label, Control control, int column, int row)
@@ -142,38 +130,86 @@ public sealed class DutyScheduleView : UserControl
     {
         try
         {
+            if (!_loadButton.Enabled)
+            {
+                return;
+            }
+
+            _isBusy = true;
+            UpdateButtonStates();
+
             _staffOptions = await _dataService.GetLinkedStaffOptionsAsync();
-            RefreshSelectedStaffText();
+            _grid.DataSource = null;
             _grid.DataSource = await _dataService.GetDutySchedulesAsync(ViewHelpers.DateOnlyFrom(_fromPicker), ViewHelpers.DateOnlyFrom(_toPicker));
+            ViewHelpers.ClearGridSelection(_grid);
+            ClearForm(clearGridSelection: false);
         }
         catch (Exception ex)
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
     }
 
     private void FillSelected()
     {
+        if (_isBusy || _isUpdatingForm)
+        {
+            return;
+        }
+
         if (_grid.CurrentRow?.DataBoundItem is not DutyScheduleRow row)
         {
             return;
         }
 
-        _selectedId = row.Id;
-        _dutyDatePicker.Value = row.DutyDate.ToDateTime(TimeOnly.MinValue);
-        _shiftBox.SelectedItem = row.ShiftCode;
-        SetSelectedStaff(row.StaffId, row.StaffName);
-        _noteBox.Text = row.Note;
+        SetFormFromRow(row);
     }
 
-    private void ClearForm()
+    private void SetFormFromRow(DutyScheduleRow row)
     {
-        _selectedId = 0;
-        _selectedStaffId = 0;
-        _staffTextBox.Clear();
-        _dutyDatePicker.Value = DateTime.Today;
-        _shiftBox.SelectedIndex = 0;
-        _noteBox.Clear();
+        _isUpdatingForm = true;
+        try
+        {
+            _selectedId = row.Id;
+            _dutyDatePicker.Value = row.DutyDate.ToDateTime(TimeOnly.MinValue);
+            _shiftBox.SelectedItem = row.ShiftCode;
+            SetSelectedStaff(row.StaffId, row.StaffName);
+            _noteBox.Text = row.Note;
+        }
+        finally
+        {
+            _isUpdatingForm = false;
+            UpdateButtonStates();
+        }
+    }
+
+    private void ClearForm(bool clearGridSelection = true)
+    {
+        _isUpdatingForm = true;
+        try
+        {
+            if (clearGridSelection)
+            {
+                ViewHelpers.ClearGridSelection(_grid);
+            }
+
+            _selectedId = 0;
+            _selectedStaffId = 0;
+            _staffTextBox.Clear();
+            _dutyDatePicker.Value = DateTime.Today;
+            _shiftBox.SelectedIndex = 0;
+            _noteBox.Clear();
+        }
+        finally
+        {
+            _isUpdatingForm = false;
+            UpdateButtonStates();
+        }
     }
 
     private async Task OpenStaffSearchAsync()
@@ -216,6 +252,7 @@ public sealed class DutyScheduleView : UserControl
     {
         _selectedStaffId = staff.Id;
         _staffTextBox.Text = staff.DisplayName;
+        UpdateButtonStates();
     }
 
     private void SetSelectedStaff(int staffId, string staffName)
@@ -234,12 +271,21 @@ public sealed class DutyScheduleView : UserControl
 
         var staff = _staffOptions.FirstOrDefault(item => item.Id == _selectedStaffId);
         _staffTextBox.Text = staff?.DisplayName ?? fallbackName;
+        UpdateButtonStates();
     }
 
     private async Task SaveAsync()
     {
         try
         {
+            if (!_saveButton.Enabled)
+            {
+                return;
+            }
+
+            _isBusy = true;
+            UpdateButtonStates();
+
             if (_selectedStaffId <= 0)
             {
                 MessageBox.Show(this, "Vui lòng chọn cán bộ trực.", "Thiếu thông tin", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -256,17 +302,24 @@ public sealed class DutyScheduleView : UserControl
             }, _actor);
 
             ViewHelpers.ShowInfo(this, "Đã lưu lịch trực.");
+            _isBusy = false;
+            ClearForm();
             await LoadDataAsync();
         }
         catch (Exception ex)
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
     }
 
     private async Task DeleteAsync()
     {
-        if (_selectedId == 0)
+        if (!_deleteButton.Enabled || _selectedId == 0)
         {
             return;
         }
@@ -278,7 +331,11 @@ public sealed class DutyScheduleView : UserControl
 
         try
         {
+            _isBusy = true;
+            UpdateButtonStates();
+
             await _dataService.DeleteDutyScheduleAsync(_selectedId, _actor);
+            _isBusy = false;
             ClearForm();
             await LoadDataAsync();
         }
@@ -286,5 +343,32 @@ public sealed class DutyScheduleView : UserControl
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
+    }
+
+    private bool IsDateRangeValid()
+    {
+        return _fromPicker.Value.Date <= _toPicker.Value.Date;
+    }
+
+    private bool HasAnyFormInput()
+    {
+        return _selectedId != 0
+               || _selectedStaffId > 0
+               || _dutyDatePicker.Value.Date != DateTime.Today
+               || _shiftBox.SelectedIndex > 0
+               || !string.IsNullOrWhiteSpace(_noteBox.Text);
+    }
+
+    private void UpdateButtonStates()
+    {
+        ViewHelpers.SetButtonState(_newButton, !_isBusy && HasAnyFormInput(), AppTheme.DeepGreen);
+        ViewHelpers.SetButtonState(_saveButton, !_isBusy && _selectedStaffId > 0, AppTheme.PoliceRed);
+        ViewHelpers.SetButtonState(_deleteButton, !_isBusy && _selectedId != 0, AppTheme.Danger);
+        ViewHelpers.SetButtonState(_loadButton, !_isBusy && IsDateRangeValid(), AppTheme.DeepGreen);
     }
 }

@@ -11,6 +11,9 @@ public sealed class BackupView : UserControl
     private readonly BusinessDataService _dataService = new();
     private readonly AuthenticatedUser _actor;
     private readonly Label _resultLabel = new();
+    private readonly Button _backupButton = ViewHelpers.CommandButton("Tạo bản sao lưu");
+    private readonly Button _openButton = ViewHelpers.CommandButton("Mở thư mục backup", AppTheme.DeepGreen);
+    private bool _isBusy;
 
     public BackupView(AuthenticatedUser actor)
     {
@@ -32,11 +35,9 @@ public sealed class BackupView : UserControl
         layout.Controls.Add(ViewHelpers.InfoLabel("Bản sao lưu hiện xuất ra file Excel gồm dữ liệu nền, lịch trực, điểm danh, cấu hình và nhật ký."), 0, 1);
 
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = AppTheme.Surface };
-        var backupButton = ViewHelpers.CommandButton("Tạo bản sao lưu");
-        backupButton.Click += async (_, _) => await BackupAsync();
-        var openButton = ViewHelpers.CommandButton("Mở thư mục backup", AppTheme.DeepGreen);
-        openButton.Click += async (_, _) => await OpenBackupFolderAsync();
-        buttons.Controls.AddRange([backupButton, openButton]);
+        _backupButton.Click += async (_, _) => await BackupAsync();
+        _openButton.Click += async (_, _) => await OpenBackupFolderAsync();
+        buttons.Controls.AddRange([_backupButton, _openButton]);
         layout.Controls.Add(buttons, 0, 2);
 
         _resultLabel.Dock = DockStyle.Fill;
@@ -45,12 +46,21 @@ public sealed class BackupView : UserControl
         layout.Controls.Add(_resultLabel, 0, 3);
         card.Controls.Add(layout);
         Controls.Add(card);
+        UpdateButtonStates();
     }
 
     private async Task BackupAsync()
     {
         try
         {
+            if (_isBusy)
+            {
+                return;
+            }
+
+            _isBusy = true;
+            UpdateButtonStates();
+
             var path = await _exportService.CreateFullBackupWorkbookAsync(_actor);
             _resultLabel.Text = path;
             ViewHelpers.ShowInfo(this, $"Đã tạo bản sao lưu:\r\n{path}");
@@ -59,12 +69,25 @@ public sealed class BackupView : UserControl
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
     }
 
     private async Task OpenBackupFolderAsync()
     {
         try
         {
+            if (_isBusy)
+            {
+                return;
+            }
+
+            _isBusy = true;
+            UpdateButtonStates();
+
             var directory = await _dataService.GetBackupDirectoryAsync();
             Process.Start(new ProcessStartInfo(directory) { UseShellExecute = true });
         }
@@ -72,5 +95,16 @@ public sealed class BackupView : UserControl
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
+    }
+
+    private void UpdateButtonStates()
+    {
+        ViewHelpers.SetButtonState(_backupButton, !_isBusy, AppTheme.PoliceRed);
+        ViewHelpers.SetButtonState(_openButton, !_isBusy, AppTheme.DeepGreen);
     }
 }

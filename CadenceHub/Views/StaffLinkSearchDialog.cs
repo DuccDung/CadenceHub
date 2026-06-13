@@ -12,6 +12,7 @@ internal sealed class StaffLinkSearchDialog : Form
     private readonly int? _initialStaffId;
     private readonly TextBox _searchBox = new();
     private readonly DataGridView _grid = new();
+    private readonly Button _selectButton = ViewHelpers.CommandButton("Chọn", AppTheme.DeepGreen);
 
     [Browsable(false)]
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -53,6 +54,7 @@ internal sealed class StaffLinkSearchDialog : Form
         _grid.AutoGenerateColumns = false;
         _grid.ReadOnly = true;
         AddGridColumns();
+        _grid.SelectionChanged += (_, _) => UpdateButtonStates();
         _grid.CellDoubleClick += (_, _) => ConfirmSelection();
         _grid.KeyDown += (_, e) =>
         {
@@ -72,18 +74,20 @@ internal sealed class StaffLinkSearchDialog : Form
         noLinkButton.Click += (_, _) =>
         {
             ClearGridSelection();
-            ConfirmSelection();
+            SelectedStaff = null;
+            DialogResult = DialogResult.OK;
+            Close();
         };
-        var selectButton = ViewHelpers.CommandButton("Chọn", AppTheme.DeepGreen);
-        selectButton.Click += (_, _) => ConfirmSelection();
+        _selectButton.Click += (_, _) => ConfirmSelection();
         buttons.Controls.Add(cancelButton);
         buttons.Controls.Add(noLinkButton);
-        buttons.Controls.Add(selectButton);
+        buttons.Controls.Add(_selectButton);
         root.Controls.Add(buttons, 0, 2);
 
-        AcceptButton = selectButton;
+        AcceptButton = _selectButton;
         CancelButton = cancelButton;
         Controls.Add(root);
+        UpdateButtonStates();
     }
 
     private void ApplyFilter()
@@ -161,18 +165,25 @@ internal sealed class StaffLinkSearchDialog : Form
 
     private void ClearGridSelection()
     {
-        _grid.ClearSelection();
-        if (_grid.Rows.Count > 0)
-        {
-            _grid.CurrentCell = null;
-        }
+        ViewHelpers.ClearGridSelection(_grid);
+        UpdateButtonStates();
     }
 
     private void ConfirmSelection()
     {
+        if (!_selectButton.Enabled)
+        {
+            return;
+        }
+
         SelectedStaff = _grid.CurrentRow?.DataBoundItem as StaffEditorRow;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    private void UpdateButtonStates()
+    {
+        ViewHelpers.SetButtonState(_selectButton, _grid.CurrentRow?.DataBoundItem is StaffEditorRow, AppTheme.DeepGreen);
     }
 
     private static string NormalizeSearchText(string value)

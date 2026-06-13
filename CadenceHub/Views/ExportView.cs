@@ -9,6 +9,8 @@ public sealed class ExportView : UserControl
     private readonly ComboBox _reportTypeBox = new();
     private readonly DateTimePicker _datePicker = new();
     private readonly Label _outputLabel = new();
+    private readonly Button _exportButton = ViewHelpers.CommandButton("Xuất Excel");
+    private bool _isBusy;
 
     public ExportView()
     {
@@ -46,9 +48,8 @@ public sealed class ExportView : UserControl
         };
         layout.Controls.Add(_datePicker, 1, 1);
 
-        var exportButton = ViewHelpers.CommandButton("Xuất Excel");
-        exportButton.Click += async (_, _) => await ExportAsync();
-        layout.Controls.Add(exportButton, 1, 2);
+        _exportButton.Click += async (_, _) => await ExportAsync();
+        layout.Controls.Add(_exportButton, 1, 2);
 
         _outputLabel.Dock = DockStyle.Fill;
         _outputLabel.Font = AppTheme.Font(10.5f, FontStyle.Bold);
@@ -57,15 +58,35 @@ public sealed class ExportView : UserControl
 
         card.Controls.Add(layout);
         Controls.Add(card);
+        UpdateButtonStates();
     }
 
     private async Task ExportAsync()
     {
         try
         {
-            var path = _reportTypeBox.SelectedIndex == 0
-                ? await _exportService.ExportDailyReportAsync(DateOnly.FromDateTime(_datePicker.Value.Date))
-                : await _exportService.ExportMonthlyReportAsync(_datePicker.Value.Year, _datePicker.Value.Month);
+            if (_isBusy)
+            {
+                return;
+            }
+
+            var selectedDate = _datePicker.Value.Date;
+            var isDailyReport = _reportTypeBox.SelectedIndex == 0;
+            var fileName = isDailyReport
+                ? $"bao_cao_ngay_{DateOnly.FromDateTime(selectedDate):yyyyMMdd}.xlsx"
+                : $"bao_cao_thang_{selectedDate.Year:0000}_{selectedDate.Month:00}.xlsx";
+            var outputPath = ViewHelpers.PickExcelSavePath(this, fileName);
+            if (outputPath is null)
+            {
+                return;
+            }
+
+            _isBusy = true;
+            UpdateButtonStates();
+
+            var path = isDailyReport
+                ? await _exportService.ExportDailyReportAsync(DateOnly.FromDateTime(selectedDate), outputPath)
+                : await _exportService.ExportMonthlyReportAsync(selectedDate.Year, selectedDate.Month, outputPath);
             _outputLabel.Text = path;
             ViewHelpers.ShowInfo(this, $"Đã xuất file Excel:\r\n{path}");
         }
@@ -73,5 +94,15 @@ public sealed class ExportView : UserControl
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
+    }
+
+    private void UpdateButtonStates()
+    {
+        ViewHelpers.SetButtonState(_exportButton, !_isBusy, AppTheme.PoliceRed);
     }
 }

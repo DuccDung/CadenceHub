@@ -15,7 +15,13 @@ public sealed class StaffManagementView : UserControl
     private readonly TextBox _positionCodeBox = new();
     private readonly TextBox _positionNameBox = new();
     private readonly CheckBox _activeCheck = new() { Text = "Đang hoạt động", Checked = true, Dock = DockStyle.Fill };
+    private readonly Button _newButton = ViewHelpers.CommandButton("Tạo mới", AppTheme.DeepGreen);
+    private readonly Button _saveButton = ViewHelpers.CommandButton("Lưu cán bộ");
+    private readonly Button _importButton = ViewHelpers.CommandButton("Import Excel", AppTheme.Navy);
+    private readonly Button _reloadButton = ViewHelpers.CommandButton("Tải lại", AppTheme.DeepGreen);
     private int _selectedId;
+    private bool _isBusy;
+    private bool _isUpdatingForm;
 
     public StaffManagementView(AuthenticatedUser user)
     {
@@ -48,21 +54,23 @@ public sealed class StaffManagementView : UserControl
         AddField(form, "Họ tên", _nameBox, 1);
         AddField(form, "Đơn vị", _unitBox, 2);
         AddField(form, "Mã chức vụ", _positionCodeBox, 3);
+        _codeBox.TextChanged += (_, _) => UpdateButtonStates();
+        _nameBox.TextChanged += (_, _) => UpdateButtonStates();
+        _unitBox.TextChanged += (_, _) => UpdateButtonStates();
+        _positionCodeBox.TextChanged += (_, _) => UpdateButtonStates();
         form.Controls.Add(new Label { Text = "Tên chức vụ", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = AppTheme.Font(10, FontStyle.Bold) }, 0, 2);
         _positionNameBox.Dock = DockStyle.Fill;
+        _positionNameBox.TextChanged += (_, _) => UpdateButtonStates();
         form.Controls.Add(_positionNameBox, 1, 2);
+        _activeCheck.CheckedChanged += (_, _) => UpdateButtonStates();
         form.Controls.Add(_activeCheck, 3, 2);
 
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = AppTheme.Surface, Padding = new Padding(0, 8, 0, 0) };
-        var newButton = ViewHelpers.CommandButton("Tạo mới", AppTheme.DeepGreen);
-        newButton.Click += (_, _) => ClearForm();
-        var saveButton = ViewHelpers.CommandButton("Lưu cán bộ");
-        saveButton.Click += async (_, _) => await SaveAsync();
-        var importButton = ViewHelpers.CommandButton("Import Excel", AppTheme.Navy);
-        importButton.Click += async (_, _) => await ImportAsync();
-        var reloadButton = ViewHelpers.CommandButton("Tải lại", AppTheme.DeepGreen);
-        reloadButton.Click += async (_, _) => await LoadDataAsync();
-        buttons.Controls.AddRange([newButton, saveButton, importButton, reloadButton]);
+        _newButton.Click += (_, _) => ClearForm();
+        _saveButton.Click += async (_, _) => await SaveAsync();
+        _importButton.Click += async (_, _) => await ImportAsync();
+        _reloadButton.Click += async (_, _) => await LoadDataAsync();
+        buttons.Controls.AddRange([_newButton, _saveButton, _importButton, _reloadButton]);
         form.SetColumnSpan(buttons, 4);
         form.Controls.Add(buttons, 0, 3);
 
@@ -76,6 +84,8 @@ public sealed class StaffManagementView : UserControl
         gridCard.Controls.Add(_grid);
         root.Controls.Add(gridCard, 0, 1);
         Controls.Add(root);
+
+        UpdateButtonStates();
     }
 
     private static void AddField(TableLayoutPanel form, string label, TextBox box, int row)
@@ -92,45 +102,97 @@ public sealed class StaffManagementView : UserControl
     {
         try
         {
+            _isBusy = true;
+            UpdateButtonStates();
+
+            _grid.DataSource = null;
             _grid.DataSource = await _dataService.GetStaffRowsAsync();
+            ViewHelpers.ClearGridSelection(_grid);
+            ClearForm(clearGridSelection: false);
         }
         catch (Exception ex)
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
     }
 
     private void FillSelected()
     {
+        if (_isBusy || _isUpdatingForm)
+        {
+            return;
+        }
+
         if (_grid.CurrentRow?.DataBoundItem is not StaffEditorRow row)
         {
             return;
         }
 
-        _selectedId = row.Id;
-        _codeBox.Text = row.StaffCode;
-        _nameBox.Text = row.FullName;
-        _unitBox.Text = row.Unit;
-        _positionCodeBox.Text = row.PositionCode;
-        _positionNameBox.Text = row.PositionName;
-        _activeCheck.Checked = row.IsActive;
+        SetFormFromRow(row);
     }
 
-    private void ClearForm()
+    private void SetFormFromRow(StaffEditorRow row)
     {
-        _selectedId = 0;
-        _codeBox.Clear();
-        _nameBox.Clear();
-        _unitBox.Text = "NVĐT";
-        _positionCodeBox.Clear();
-        _positionNameBox.Clear();
-        _activeCheck.Checked = true;
+        _isUpdatingForm = true;
+        try
+        {
+            _selectedId = row.Id;
+            _codeBox.Text = row.StaffCode;
+            _nameBox.Text = row.FullName;
+            _unitBox.Text = row.Unit;
+            _positionCodeBox.Text = row.PositionCode;
+            _positionNameBox.Text = row.PositionName;
+            _activeCheck.Checked = row.IsActive;
+        }
+        finally
+        {
+            _isUpdatingForm = false;
+            UpdateButtonStates();
+        }
+    }
+
+    private void ClearForm(bool clearGridSelection = true)
+    {
+        _isUpdatingForm = true;
+        try
+        {
+            if (clearGridSelection)
+            {
+                ViewHelpers.ClearGridSelection(_grid);
+            }
+
+            _selectedId = 0;
+            _codeBox.Clear();
+            _nameBox.Clear();
+            _unitBox.Text = "NVĐT";
+            _positionCodeBox.Clear();
+            _positionNameBox.Clear();
+            _activeCheck.Checked = true;
+        }
+        finally
+        {
+            _isUpdatingForm = false;
+            UpdateButtonStates();
+        }
     }
 
     private async Task SaveAsync()
     {
         try
         {
+            if (!_saveButton.Enabled)
+            {
+                return;
+            }
+
+            _isBusy = true;
+            UpdateButtonStates();
+
             if (string.IsNullOrWhiteSpace(_codeBox.Text) || string.IsNullOrWhiteSpace(_nameBox.Text) || string.IsNullOrWhiteSpace(_unitBox.Text))
             {
                 MessageBox.Show(this, "Mã cán bộ, họ tên và đơn vị là bắt buộc.", "Thiếu thông tin", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -150,16 +212,27 @@ public sealed class StaffManagementView : UserControl
 
             ViewHelpers.ShowInfo(this, "Đã lưu cán bộ.");
             ClearForm();
+            _isBusy = false;
             await LoadDataAsync();
         }
         catch (Exception ex)
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
     }
 
     private async Task ImportAsync()
     {
+        if (!_importButton.Enabled)
+        {
+            return;
+        }
+
         using var dialog = new OpenFileDialog
         {
             Title = "Chọn file danh sách cán bộ",
@@ -173,6 +246,9 @@ public sealed class StaffManagementView : UserControl
 
         try
         {
+            _isBusy = true;
+            UpdateButtonStates();
+
             await _dataService.ImportStaffFromExcelAsync(dialog.FileName, _user);
             ViewHelpers.ShowInfo(this, "Đã import danh sách cán bộ.");
             await LoadDataAsync();
@@ -181,5 +257,36 @@ public sealed class StaffManagementView : UserControl
         {
             ViewHelpers.ShowError(this, ex);
         }
+        finally
+        {
+            _isBusy = false;
+            UpdateButtonStates();
+        }
+    }
+
+    private bool HasAnyFormInput()
+    {
+        return _selectedId != 0
+               || !string.IsNullOrWhiteSpace(_codeBox.Text)
+               || !string.IsNullOrWhiteSpace(_nameBox.Text)
+               || !string.Equals(_unitBox.Text.Trim(), "NVĐT", StringComparison.OrdinalIgnoreCase)
+               || !string.IsNullOrWhiteSpace(_positionCodeBox.Text)
+               || !string.IsNullOrWhiteSpace(_positionNameBox.Text)
+               || !_activeCheck.Checked;
+    }
+
+    private bool CanSave()
+    {
+        return !string.IsNullOrWhiteSpace(_codeBox.Text)
+               && !string.IsNullOrWhiteSpace(_nameBox.Text)
+               && !string.IsNullOrWhiteSpace(_unitBox.Text);
+    }
+
+    private void UpdateButtonStates()
+    {
+        ViewHelpers.SetButtonState(_newButton, !_isBusy && HasAnyFormInput(), AppTheme.DeepGreen);
+        ViewHelpers.SetButtonState(_saveButton, !_isBusy && CanSave(), AppTheme.PoliceRed);
+        ViewHelpers.SetButtonState(_importButton, !_isBusy, AppTheme.Navy);
+        ViewHelpers.SetButtonState(_reloadButton, !_isBusy, AppTheme.DeepGreen);
     }
 }

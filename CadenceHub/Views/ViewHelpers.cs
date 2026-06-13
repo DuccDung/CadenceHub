@@ -74,6 +74,23 @@ public static class ViewHelpers
         return button;
     }
 
+    public static void SetButtonState(Button button, bool enabled, Color? activeBackColor = null)
+    {
+        button.Enabled = enabled;
+        button.BackColor = enabled ? activeBackColor ?? AppTheme.PoliceRed : Color.FromArgb(202, 207, 214);
+        button.ForeColor = enabled ? Color.White : Color.FromArgb(111, 119, 130);
+        button.Cursor = enabled ? Cursors.Hand : Cursors.Default;
+    }
+
+    public static void ClearGridSelection(DataGridView grid)
+    {
+        grid.ClearSelection();
+        if (grid.Rows.Count > 0)
+        {
+            grid.CurrentCell = null;
+        }
+    }
+
     public static Label InfoLabel(string text, Color? color = null)
     {
         return new Label
@@ -154,6 +171,21 @@ public static class ViewHelpers
     public static DateOnly DateOnlyFrom(DateTimePicker picker)
     {
         return DateOnly.FromDateTime(picker.Value.Date);
+    }
+
+    public static string? PickExcelSavePath(IWin32Window owner, string fileName)
+    {
+        using var dialog = new SaveFileDialog
+        {
+            AddExtension = true,
+            DefaultExt = "xlsx",
+            FileName = fileName,
+            Filter = "Excel Workbook (*.xlsx)|*.xlsx|All files (*.*)|*.*",
+            OverwritePrompt = true,
+            Title = "Chon noi luu file Excel"
+        };
+
+        return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.FileName : null;
     }
 
     public static void ShowError(IWin32Window owner, Exception ex)
